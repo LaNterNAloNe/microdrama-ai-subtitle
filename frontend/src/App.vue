@@ -44,7 +44,7 @@
               <p>上传的文件暂无内容</p>
             </div>
 
-            <ul v-if="original_subtitles.length > 0" class="subtitle-list">
+            <ul v-if="File !== null && original_subtitles.length > 0" class="subtitle-list" :key="originalKey">
               <li v-for="(subtitle, index) in original_subtitles" :key="index" class="subtitle-item">
                 <span class="timestamp">{{ subtitle.timestamp }}</span>
                 <p class="text-original" v-html="subtitle.original"></p>
@@ -83,7 +83,7 @@
               <p>暂无翻译结果</p>
             </div>
 
-            <ul v-else class="subtitle-list">
+            <ul v-else class="subtitle-list" :key="translatedKey">
               <li v-for="(subtitle, index) in translated_subtitles" :key="index" class="subtitle-item">
                 <span class="timestamp">{{ subtitle.timestamp }}</span>
                 <p class="text-original">{{ subtitle.original }}</p>
@@ -201,6 +201,7 @@ export default {
       reader.onload = () => {
           const content = reader.result;
           original_subtitles.value = parseSRT(content); // 👈 解析为结构化数据
+          updateOriginalSubtitles();
       };
       reader.readAsText(file);
     };
@@ -273,6 +274,7 @@ export default {
           */
           if (Array.isArray(jsonData.results)) {
             original_subtitles.value = jsonData.results;
+            updateOriginalSubtitles();
             ElMessage.success('字幕 JSON 文件已成功加载');
           } else {
             ElMessage.error('JSON 文件格式不正确');
@@ -289,6 +291,7 @@ export default {
     INFO: 处理文件的函数
     ****************************************/
     const startProcessing = () => {
+      isResponsed.value = false; // 每次开始处理前重置
       if (!File.value) {
         ElMessage.warning('请先选择一个文件！');
         return;
@@ -302,22 +305,17 @@ export default {
       try {
         const fieldName = await generateFieldName();
         const uploadRes = await uploadFile(fieldName, File.value);
-
-        if (!uploadRes.ok) {
-          ElMessage.error('上传失败，请重试');
-          isProcessing.value = false;
-          return;
-        }
-        // 获得正确的回复，开始处理（无轮询情况）
-        const res = await uploadRes.json();
+        // 以上函数有上传，获取错误，处理json的功能，因此下方只需要直接利用
 
         // 等待后端处理完成（可以用轮询或 WebSocket）
         // const result = await pollForResult(); // 👈 真实获取后端返回数据
         // 注意返回体中results才表示翻译结果
         
-        translated_subtitles.value = res.results;
+        translated_subtitles.value = uploadRes.results;
+        updateTranslatedSubtitles();
         isTranslated.value = true;
         ElMessage.success('处理完成');
+        isResponsed.value = true; // 处理完成后设置为 true
       } catch (err) {
         ElMessage.error(`处理失败: ${err.message}`);
       } finally {
@@ -334,13 +332,41 @@ export default {
     const uploadFile = async (fieldName, file) => {
       const formData = new FormData();
       formData.append("file", file);
-      return fetch('http://localhost:8029/translate', {
-        method: 'POST',
-        body: formData
-      });
-      // return {
-      //   ok:true, // 模拟成功响应
-      // }
+
+      try {
+        const response = await fetch('http://localhost:8029/translate', {
+          method: 'POST',
+          body: formData
+        });
+
+        // 情况 1：HTTP 状态码错误
+        if (!response.ok) {
+          throw new Error(`服务器错误：${response.status} ${response.statusText}`);
+        }
+
+        // 情况 2：尝试解析 JSON
+        try {
+          const data = await response.json();
+          return data; // 返回 JSON 数据
+        } catch (jsonError) {
+          throw new Error('响应解析失败：服务器返回了无法识别的数据格式');
+        }
+
+      } catch (error) {
+        // 情况 3：网络错误或其他异常
+        if (error.message.includes('Failed to fetch')) {
+          throw new Error('网络错误：无法连接服务器，请检查网络或稍后重试');
+        }
+        if (error.message.includes('timeout')) {
+          throw new Error('请求超时：请检查网络连接或稍后重试');
+        }
+        if (error.message.includes('400')) {
+          throw new Error('文件类型错误：请上传 SRT 文件');
+        }
+
+        // 其他错误（如上面 throw 的）
+        throw error;
+      }
     };
 
     const pollForResult = async () => {
@@ -437,16 +463,36 @@ export default {
       }
     };
 
+    /****************************************
+    INFO: 强调字幕列表的重新渲染，重置滚动进度
+    ****************************************/
+    const originalKey = ref(0);
+    const translatedKey = ref(0);
+
+    // 每次更新字幕时调用
+    const updateOriginalSubtitles = () => {
+      originalKey.value++; // 改变 key，强制重新渲染
+    };
+
+    const updateTranslatedSubtitles = () => {
+      translatedKey.value++;
+    };
+
+    const isResponsed = ref(false);
+
     return {
       fileInput,
       File,
       isProcessing,
       original_subtitles,
       translated_subtitles,
-      isTranslated,
+      isTranslated, // 只判断是否存在翻译结果，与翻译结果是否改变无关
+      isResponsed, // 只判断翻译结果是否改变，决定是否需要重置滚动位置
       downloadJSONoffset,
       downloadSRToffset,
       animationDuration,
+      originalKey,
+      translatedKey,
       triggerFileUpload,
       handleFileChange,
       clearFile,
@@ -462,6 +508,8 @@ export default {
       downloadSRT,
       downloadJSON,
       handleBeforeUnload,
+      updateOriginalSubtitles,
+      updateTranslatedSubtitles,
     };
     // 这表示：你希望这些变量和方法可以在 <template> 中被访问和使用。
     // 实际上你使用script setup 时，所有在 setup 函数中定义的变量和方法都会自动暴露到模板中。
@@ -672,6 +720,7 @@ body {
 
 .subtitle-list {
   list-style-type: none;
+  overflow-y: auto;
   padding: 0;
   margin: 0;
 }
