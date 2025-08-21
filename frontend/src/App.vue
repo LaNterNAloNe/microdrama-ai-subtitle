@@ -1,0 +1,860 @@
+<template>
+  <div id="app-container">
+    <header class="app-header">
+      <h1>中国网络微短剧英译智能体</h1>
+      <p class="subtitle">AI-Powered Chinese Short Drama Translation Agent</p>
+    </header>
+
+    <main class="main-content">
+      <section class="upload-section">
+        <div class="upload-box" @dragover.prevent @drop.prevent="handleDrop" @click="triggerFileUpload">
+          <input type="file" id="file-upload" @change="handleFileChange" accept=".srt,.json" ref="fileInput" style="display: none;">
+          
+          <div v-if="!File" class="upload-prompt">
+            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="upload-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg> <!-- upload icon -->
+            <p>将文本或字幕文件拖拽到此处</p>
+            <small class="file-info">支持 json srt 格式</small>
+          </div>
+
+          <div v-if="File" class="file-details">
+            <h4>已选择文件:</h4>
+            <p>{{ File.name }}</p>
+            <button @click.stop="startProcessing" class="process-button-green" :disabled="isProcessing">
+              {{ isProcessing ? '处理中...' : '开始翻译' }}
+            </button>
+            <br>
+            <button @click.stop="clearFile" class="process-button-red" :disabled="isProcessing">清除文件</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="display-section">
+        <!-- 源文件预览 -->
+        <h3 class="tight-title">源字幕预览 (Original Subtitle Preview)</h3>
+        <div class="subtitle-display-container" style="position: relative;">
+          <transition name="fade-mask" :duration="animationDuration">
+            <div v-if="downloadJSONoffset" class="blurred"></div>
+          </transition>
+
+          <div class="subtitle-area">
+            <div v-if="File === null" class="subtitle-placeholder"> 
+              <p>上传的文件或字幕内容将在此显示...</p>
+            </div>
+            <div v-if="File !== null && original_subtitles.length === 0" class="subtitle-placeholder">
+              <p>上传的文件暂无内容</p>
+            </div>
+
+            <ul v-if="original_subtitles.length > 0" class="subtitle-list">
+              <li v-for="(subtitle, index) in original_subtitles" :key="index" class="subtitle-item">
+                <span class="timestamp">{{ subtitle.timestamp }}</span>
+                <p class="text-original" v-html="subtitle.original"></p>
+                <p class="text-original" v-if="subtitle.translated">{{ subtitle.translated }}</p>
+              </li>
+            </ul>
+
+          </div>
+          <!-- 使用css动画时，不得与vue的动画混合使用，否则会冲突 -->
+          <transition name="fade-zoom" :duration="animationDuration">
+            <div v-if="downloadJSONoffset" class="svg-overlay">
+              <div class="svg-inner">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 48 48" fill="none">
+                <path d="M16 24L22 30L34 18" stroke="green" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </div>
+          </transition>
+        </div>
+        <button v-if="File" @click="downloadJSON(original_subtitles)" class="process-button-green" :disabled="downloadJSONoffset">下载原字幕json文件</button>
+
+        <!-- 翻译字幕预览 -->
+        <h3 class="tight-title">翻译字幕预览 (Translated Subtitle Preview)</h3>
+        <div class="subtitle-display-container" style="position: relative;">
+          <transition name="fade-mask" :duration="animationDuration">
+            <div v-if="downloadSRToffset" class="blurred"></div>
+          </transition>
+
+          <div class="subtitle-area">
+            <div v-if="!isTranslated && translated_subtitles.length === 0" class="subtitle-placeholder"> 
+            <!-- 此处应判断是否完成翻译（翻译结果包含无文本【特殊情况】） -->
+              <p>翻译生成的字幕将在此显示...</p>
+            </div>
+
+            <div v-if="translated_subtitles.length === 0 && isTranslated" class="subtitle-placeholder"> 
+              <p>暂无翻译结果</p>
+            </div>
+
+            <ul v-else class="subtitle-list">
+              <li v-for="(subtitle, index) in translated_subtitles" :key="index" class="subtitle-item">
+                <span class="timestamp">{{ subtitle.timestamp }}</span>
+                <p class="text-original">{{ subtitle.original }}</p>
+                <p class="text-translated">{{ subtitle.translated }}</p>
+              </li>
+            </ul>
+
+          </div>
+          <!-- 使用css动画时，不得与vue的动画混合使用，否则会冲突 -->
+          <transition name="fade-zoom" :duration="animationDuration">
+            <div v-if="downloadSRToffset" class="svg-overlay">
+              <div class="svg-inner">
+                <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 48 48" fill="none">
+                <path d="M16 24L22 30L34 18" stroke="green" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </div>
+          </transition>
+
+        </div>
+        <button v-if="isTranslated || translated_subtitles.length > 0" @click="downloadSRT(translated_subtitles)" class="process-button-green" :disabled="downloadSRToffset">下载字幕文件</button>
+      </section>
+    </main>
+  </div>
+</template>
+
+<script>
+import { ElMessage } from 'element-plus';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
+
+
+async function getUserIP() {
+  try {
+    const res = await fetch('https://api.ipify.org?format=json');
+    const data = await res.json();
+    console.log('用户 IP:', data.ip);
+    return data.ip;
+  } catch (error) {
+    console.error('获取 IP 失败:', error);
+    return null;
+  }
+}
+
+export default {
+  name: 'App',
+  setup() {
+    const fileInput = ref(null);
+    const File = ref(null);
+    const isProcessing = ref(false);
+    const isTranslated = ref(false);
+    const downloadJSONoffset = ref(false);
+    const downloadSRToffset = ref(false);
+    const animationDuration = ref(1000);
+    
+    // Placeholder for subtitle data
+    const original_subtitles = ref([
+      // Example data structure
+      // { timestamp: '00:00:01,234 --> 00:00:03,456', original: '你好！', translated: 'Hello!' },
+    ]);
+    const translated_subtitles = ref([
+      // Example data structure
+      // { timestamp: '00:00:01,234 --> 00:00:03,456', original: '你好！', translated: 'Hello!' },
+    ]);
+
+    /****************************************
+    INFO: 触发操作文件的函数
+    ****************************************/
+    const triggerFileUpload = () => {
+      fileInput.value.click();
+    };
+
+    const handleDrop = (event) => {
+      const file = event.dataTransfer.files[0];
+      const fileName = file.name.toLowerCase();
+      if (file && (fileName.endsWith('.srt'))) {
+        File.value = file;
+        ElMessage.success('srt 字幕文件已成功加载');
+        readSubtitleFile(file); // 👈 添加解析方法
+      } else if (file && fileName.endsWith('.json')) {
+        File.value = file;
+        handleJSONUpload(file); // 👈 处理 JSON 文件
+      } else {
+        ElMessage.warning('请拖入一个有效的文本或字幕文件！');
+      }
+    };
+
+    const handleFileChange = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      const fileName = file.name.toLowerCase();
+        if (fileName.endsWith('.srt')) {
+        File.value = file;
+        ElMessage.success('srt 字幕文件已成功加载');
+        readSubtitleFile(file); // 👈 添加解析方法
+      } else if (fileName.endsWith('.json')) {
+        File.value = file;
+        handleJSONUpload(file); // 👈 处理 JSON 文件
+      } else {
+        ElMessage.warning('请选择一个有效的字幕文件（.srt, .json）！');
+      }
+    };
+
+    const clearFile = () => {
+      File.value = null;
+      original_subtitles.value = [];
+      isTranslated.value = false;
+      downloadJSONoffset.value = false;
+    };
+
+    /****************************************
+    INFO: 解析字幕文件的函数
+    ****************************************/
+    const readSubtitleFile = (file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+          const content = reader.result;
+          original_subtitles.value = parseSRT(content); // 👈 解析为结构化数据
+      };
+      reader.readAsText(file);
+    };
+
+    const parseSRT = (text) => {
+      // 去除 BOM
+      if (text.charCodeAt(0) === 0xFEFF) {
+        text = text.slice(1);
+      }
+
+      // 标准化换行符
+      const normalizedText = text.replace(/\r\n|\r/g, '\n');
+      // 按行分割并清理
+      const lines = normalizedText.split('\n').map(line => line.trim()).filter(line => line !== '');
+
+      const subtitles = [];
+      let i = 0;
+
+      while (i < lines.length) {
+        // 判断是否是字幕编号
+        if (/^\d+$/.test(lines[i])) {
+          const index = lines[i];
+          const timestamp = lines[i + 1];
+
+          // 判断时间戳是否合法
+          if (/-->/i.test(timestamp)) {
+            let contentLines = [];
+            let j = i + 2;
+
+            // 收集内容行，直到遇到下一个编号或文件结束
+            while (j < lines.length && !/^\d+$/.test(lines[j])) {
+              contentLines.push(lines[j]);
+              j++;
+            }
+
+            const original = contentLines[0] || '';
+            const translated = contentLines[1] || '';
+
+            subtitles.push({
+              index,
+              timestamp,
+              original,
+              translated,
+              allContent: contentLines // 可选：保留所有内容行
+            });
+
+            i = j; // 跳到下一块字幕
+          } else {
+            i++; // 时间戳不合法，跳过
+          }
+        } else {
+          i++; // 非编号行，跳过
+        }
+      }
+
+      return subtitles;
+    };
+
+    const handleJSONUpload = (file) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const jsonData = JSON.parse(reader.result);
+
+          /*
+          JSON 文件结构为 
+          { results: [...] 
+            // results 数组中每个元素结构同 parseSRT 解析后的对象
+          }
+          */
+          if (Array.isArray(jsonData.results)) {
+            original_subtitles.value = jsonData.results;
+            ElMessage.success('字幕 JSON 文件已成功加载');
+          } else {
+            ElMessage.error('JSON 文件格式不正确');
+          }
+        } catch (error) {
+          console.error('解析 JSON 失败:', error);
+          ElMessage.error('无法解析 JSON 文件');
+        }
+      };
+      reader.readAsText(file);
+    };
+
+    /****************************************
+    INFO: 处理文件的函数
+    ****************************************/
+    const startProcessing = () => {
+      if (!File.value) {
+        ElMessage.warning('请先选择一个文件！');
+        return;
+      }
+      isProcessing.value = true;
+      console.log('开始处理文件:', File.value.name);
+      handleResponse(); // 👈 交给模块化函数处理
+    };
+
+    const handleResponse = async () => {
+      try {
+        const fieldName = await generateFieldName();
+        const uploadRes = await uploadFile(fieldName, File.value);
+
+        if (!uploadRes.ok) {
+          ElMessage.error('上传失败，请重试');
+          isProcessing.value = false;
+          return;
+        }
+        // 获得正确的回复，开始处理（无轮询情况）
+        const res = await uploadRes.json();
+
+        // 等待后端处理完成（可以用轮询或 WebSocket）
+        // const result = await pollForResult(); // 👈 真实获取后端返回数据
+        // 注意返回体中results才表示翻译结果
+        
+        translated_subtitles.value = res.results;
+        isTranslated.value = true;
+        ElMessage.success('处理完成');
+      } catch (err) {
+        ElMessage.error(`处理失败: ${err.message}`);
+      } finally {
+        isProcessing.value = false;
+      }
+    };
+
+    const generateFieldName = async () => {
+      const ip = await getUserIP();
+      const timestamp = new Date().toLocaleString('sv').replace(' ', '-').replace(/:/g, '');
+      return `subtitle_${ip}_${timestamp}`;
+    };
+
+    const uploadFile = async (fieldName, file) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      return fetch('http://localhost:8029/translate', {
+        method: 'POST',
+        body: formData
+      });
+      // return {
+      //   ok:true, // 模拟成功响应
+      // }
+    };
+
+    const pollForResult = async () => {
+      // 假设后端提供轮询接口
+      const response = await fetch('http://localhost:8029/translate');
+      if (!response.ok) throw new Error('后端处理失败');
+      return response.json(); // 返回字幕数据
+    };
+
+
+    /****************************************
+    INFO: 转换为SRT格式的函数
+    ****************************************/
+
+    const convertToSRT = (subtitlesArray) => {
+      return subtitlesArray.map((item, index) => {
+        return `${index + 1}\n${item.timestamp}\n${item.original}\n${item.translated}\n\n`
+      }).join('')
+    };
+
+    const downloadSRT = () => {
+      downloadSRToffset.value = true; // 设置下载状态为 true
+      const srtContent = convertToSRT(translated_subtitles.value)
+      const blob = new Blob([srtContent], { type: 'text/plain;charset=plaintext' })
+      const url = URL.createObjectURL(blob)
+
+      // 获取文件名称
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = String(now.getMonth() + 1).padStart(2, '0'); // 月份从 0 开始
+      const day = String(now.getDate()).padStart(2, '0');
+      const hour = String(now.getHours()).padStart(2, '0');
+      const minute = String(now.getMinutes()).padStart(2, '0');
+      const second = String(now.getSeconds()).padStart(2, '0');
+      const downloadFileName = `subtitles-${year}${month}${day}-${hour}${minute}${second}.srt`;
+
+      const a = document.createElement('a')
+      a.href = url
+      a.download = downloadFileName;
+      a.click()
+      setTimeout(() => {
+        downloadSRToffset.value = false; // 下载完成后重置状态
+      }, animationDuration.value); // 1秒后重置状态
+      URL.revokeObjectURL(url)
+    };
+
+    const downloadJSON = (data) => {
+      if (!data || data.length === 0) {
+        ElMessage.error('没有数据可下载');
+        return;
+      }
+      downloadJSONoffset.value = true; // 设置下载状态为 true
+
+      let index = 0;
+      const cleanedData = data.map(item => {
+        return {
+          index: ++index,
+          timestamp: item.timestamp,
+          original: item.original,
+          translated: item.translated || ''
+        };
+      });
+      const wrappedData = { results: cleanedData }; // 包装数据为 { results: [...] }
+      const jsonContent = JSON.stringify(wrappedData, null, 2);
+      const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const filename = `subtitles-${new Date().toISOString().replace(/[:.]/g, '-')}-as-json.json`; // 使用 ISO 格式的时间戳作为文件名
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => {
+        downloadJSONoffset.value = false; // 下载完成后重置状态
+      }, animationDuration.value); // 1秒后重置状态
+      URL.revokeObjectURL(url);
+    };
+
+    /****************************************
+    INFO: 页面关闭前的确认提示
+    ****************************************/
+    onMounted(() => {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      document.documentElement.style.setProperty('--duration', animationDuration.value + 'ms')
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    });
+
+    const handleBeforeUnload = (event) => {
+      if (isTranslated.value || translated_subtitles.value.length > 0) {
+        event.preventDefault();
+        event.returnValue = ''; // 某些浏览器需要设置这个才能触发提示
+      }
+    };
+
+    return {
+      fileInput,
+      File,
+      isProcessing,
+      original_subtitles,
+      translated_subtitles,
+      isTranslated,
+      downloadJSONoffset,
+      downloadSRToffset,
+      animationDuration,
+      triggerFileUpload,
+      handleFileChange,
+      clearFile,
+      readSubtitleFile,
+      handleDrop,
+      startProcessing,
+      parseSRT,
+      handleResponse,
+      generateFieldName,
+      uploadFile,
+      pollForResult,
+      convertToSRT,
+      downloadSRT,
+      downloadJSON,
+      handleBeforeUnload,
+    };
+    // 这表示：你希望这些变量和方法可以在 <template> 中被访问和使用。
+    // 实际上你使用script setup 时，所有在 setup 函数中定义的变量和方法都会自动暴露到模板中。
+  }
+}
+</script>
+
+<style>
+/* Title */
+.tight-title {
+  margin: 0px 0;
+  line-height: 1;
+}
+
+/* Global Styling */
+:root {
+  --primary-color: #4A90E2;
+  --secondary-color: #50E3C2;
+  --background-color: #f4f7f9;
+  --text-color: #333;
+  --border-color: #dbe2e8;
+  --card-bg-color: #ffffff;
+  --forbidden-color: #ff4958;
+  --font-family: 'Helvetica Neue', Arial, sans-serif;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--background-color);
+  color: var(--text-color);
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+#app-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+/* Header */
+.app-header {
+  text-align: center;
+  margin-bottom: 2.5rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 1.5rem;
+}
+
+.app-header h1 {
+  font-size: 2.5rem;
+  color: var(--primary-color);
+  margin: 0;
+}
+
+.app-header .subtitle {
+  font-size: 1rem;
+  color: #777;
+  margin-top: 0.5rem;
+}
+
+/* Main Content Layout */
+.main-content {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: stretch;
+  animation: fadeIn 1s ease-out;
+}
+
+.upload-section, .display-section {
+  background-color: var(--card-bg-color);
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  padding: 2rem;
+}
+
+.upload-section {
+  flex: 1;
+  min-width: 20%;
+  max-width: 40%;
+  flex-direction: column;
+  animation: slideInX-left 1s ease;
+  overflow: hidden;
+}
+
+.display-section {
+  flex: 2;
+  min-width: 40%;
+  max-width: 80%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  animation: slideInX-right 1s ease;
+  overflow: hidden;
+}
+
+/* Upload Box */
+.upload-box {
+  border: 2px dashed var(--border-color);
+  border-radius: 10px;
+  padding: 2rem;
+  text-align: center;
+  transition: all 0.3s ease;
+  height: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-box:hover {
+  border-color: var(--primary-color);
+  background-color: #f9fcff;
+}
+
+.upload-icon {
+  color: var(--primary-color);
+  margin-bottom: 1rem;
+}
+
+.upload-button {
+  background-color: var(--primary-color);
+  color: white;
+  border: none;
+  padding: 0.8rem 1.5rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: background-color 0.3s ease;
+  margin: 1rem 0;
+}
+
+.upload-button:hover {
+  background-color: #357abd;
+}
+
+.file-info {
+  color: #888;
+  font-size: 0.85rem;
+}
+
+.file-details p {
+    word-break: break-all;
+    background-color: #f0f0f0;
+    padding: 0.5rem;
+    border-radius: 5px;
+}
+
+.process-button-green {
+    background-color: var(--secondary-color);
+    color: white;
+    border: none;
+    padding: 0.8rem 2rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: background-color 0.3s ease;
+    margin-top: 1rem;
+}
+
+.process-button-green:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+}
+
+.process-button-red {
+    background-color: var(--forbidden-color);
+    color: white;
+    border: none;
+    padding: 0.8rem 2rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: background-color 0.3s ease;
+    margin-top: 1rem;
+}
+
+/* Display Section */
+.subtitle-display-container {
+  width: 100%;
+}
+
+.subtitle-area {
+  height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  position: relative;
+  scrollbar-width: none; /* Firefox 隐藏滚动条 */
+  -ms-overflow-style: none; /* IE 10+ 隐藏滚动条 */
+}
+
+.subtitle-area::-webkit-scrollbar {
+  display: none; /* Chrome、Safari 隐藏滚动条 */
+}
+
+.subtitle-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  color: #888;
+}
+
+.subtitle-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+}
+
+.subtitle-item {
+  margin-bottom: 1.2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  animation: slideInY-bottom-slight 1s ease;
+}
+.subtitle-item:last-child {
+  border-bottom: none;
+}
+
+.timestamp {
+  font-size: 0.8rem;
+  color: #666;
+  font-family: 'Courier New', monospace;
+  margin-bottom: 0.4rem;
+  display: block;
+}
+
+.text-original {
+  font-size: 1rem;
+  color: #333;
+  font-family: sans-serif;
+  margin: 0 0 0.3rem 0;
+}
+
+.text-translated {
+  font-size: 1rem;
+  color: var(--primary-color);
+  font-weight: 500;
+  font-family: sans-serif;
+  margin: 0;
+}
+
+/* SVG Overlay */
+.svg-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.svg-inner {
+  display: flex;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 50%;
+  padding: 1rem;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+}
+
+.fade-zoom-enter-active,
+.fade-zoom-leave-active {
+  transition: transform var(--duration) ease, opacity var(--duration) ease;
+}
+
+.fade-zoom-enter-from {
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+}
+.fade-zoom-enter-to {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+.fade-zoom-leave-from {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+.fade-zoom-leave-to {
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+}
+
+.fade-mask-enter-active,
+.fade-mask-leave-active {
+  transition: opacity 0.5s ease;
+}
+
+.fade-mask-enter-from,
+.fade-mask-leave-to {
+  opacity: 0;
+}
+
+.fade-mask-enter-to,
+.fade-mask-leave-from {
+  opacity: 1;
+}
+
+.blurred {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  backdrop-filter: blur(6px); /* 背景模糊 */
+  background-color: rgba(255, 255, 255, 0.2); /* 可选：增加雾感 */
+  z-index: 5;
+  pointer-events: auto;
+}
+
+/* CSS动画效果 */
+@keyframes fadeIn {
+  0% { opacity: 0; 
+       filter: blur(5px); }
+  100% { opacity: 1; }
+}
+
+@keyframes slideInX-left {
+  0% { transform: translateX(-100%);
+       opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInX-right {
+  0% { transform: translateX(100%);
+       opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideInY-top-slight {
+  0% {
+    transform: translate(-50%, calc(-50% - 50px));
+    opacity: 0;
+  }
+  20% {
+    transform: translate(-50%, -50%);
+    opacity: 1;
+  }
+  60% { 
+    transform: translate(-50%, -50%);
+    opacity: 1; 
+  }
+  80% { 
+    transform: translate(-50%, calc(-50% + 50px));
+    opacity: 0; 
+  }
+}
+
+@keyframes slideInY-bottom-slight {
+  0% { transform: translateY(50px);
+       opacity: 0; }
+  50% { transform: translateY(0); opacity: 1; }
+  
+}
+
+@media (max-aspect-ratio: 1/1) {
+  #app-container {
+    padding: 1rem;
+  }
+
+  .main-content {
+    flex-direction: column;
+    gap: 1rem;
+    max-width: none; /* 确保没有限制最大宽度 */
+  }
+
+  .upload-section,
+  .display-section {
+    max-width: 600px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 1rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    animation: none;
+  }
+
+  .app-header h1 {
+    font-size: 1.8rem;
+  }
+
+  .app-header .subtitle {
+    font-size: 0.9rem;
+  }
+
+  .subtitle-area {
+    height: auto;
+    max-height: 250px;
+  }
+}
+
+</style>
