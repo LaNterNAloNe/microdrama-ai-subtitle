@@ -44,7 +44,7 @@
               <p>上传的文件暂无内容</p>
             </div>
 
-            <ul v-if="File !== null && original_subtitles.length > 0" class="subtitle-list" :key="originalKey" ref="originalSubtitleList">
+            <ul v-if="File !== null && original_subtitles.length > 0" class="subtitle-list" :key="originalKey">
               <li v-for="(subtitle, index) in original_subtitles" :key="index" class="subtitle-item">
                 <span class="timestamp">{{ subtitle.timestamp }}</span>
                 <p class="text-original" v-html="subtitle.original"></p>
@@ -83,7 +83,7 @@
               <p>暂无翻译结果</p>
             </div>
 
-            <ul v-else class="subtitle-list" :key="translatedKey" ref="translatedSubtitleList">
+            <ul v-else class="subtitle-list" :key="translatedKey">
               <li v-for="(subtitle, index) in translated_subtitles" :key="index" class="subtitle-item">
                 <span class="timestamp">{{ subtitle.timestamp }}</span>
                 <p class="text-original">{{ subtitle.original }}</p>
@@ -112,7 +112,7 @@
 
 <script>
 import { ElMessage } from 'element-plus';
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
 
 
 async function getUserIP() {
@@ -478,24 +478,7 @@ export default {
       translatedKey.value++;
     };
 
-    const originalSubtitleList = ref(null);
-    const translatedSubtitleList = ref(null);
     const isResponsed = ref(false);
-
-    watch(File, async () => {
-      await nextTick();
-      if (File.value) {
-        originalSubtitleList.value.scrollTop = 0;
-      }
-    });
-
-
-    watch(isResponsed, async () => {
-      await nextTick(); // 等 DOM 更新完成
-      if (isResponsed.value) {
-        translatedSubtitleList.value.scrollTop = 0; // 重置滚动位置
-      }
-    });
 
     return {
       fileInput,
@@ -510,8 +493,6 @@ export default {
       animationDuration,
       originalKey,
       translatedKey,
-      originalSubtitleList,
-      translatedSubtitleList,
       triggerFileUpload,
       handleFileChange,
       clearFile,

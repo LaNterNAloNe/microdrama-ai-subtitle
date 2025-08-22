@@ -44,7 +44,11 @@
               <p>上传的文件暂无内容</p>
             </div>
 
-            <ul v-if="File !== null && original_subtitles.length > 0" class="subtitle-list" :key="originalKey">
+            
+            <ul v-if="File !== null && original_subtitles.length > 0" class="subtitle-list" :key="originalKey" ref="originalSubtitlesList">
+              <section v-if="File !== null && original_subtitles.length > 0" @scroll="updateOriginalSubtitles" class="subtitle-list-info">
+                <p>已加载 {{ original_subtitles.length }} 条字幕</p>
+              </section>
               <li v-for="(subtitle, index) in original_subtitles" :key="index" class="subtitle-item">
                 <span class="timestamp">{{ subtitle.timestamp }}</span>
                 <p class="text-original" v-html="subtitle.original"></p>
@@ -74,9 +78,13 @@
           </transition>
 
           <div class="subtitle-area">
-            <div v-if="!isTranslated && translated_subtitles.length === 0" class="subtitle-placeholder"> 
+            <div v-if="!isTranslated && translated_subtitles.length === 0 && !isProcessing" class="subtitle-placeholder"> 
             <!-- 此处应判断是否完成翻译（翻译结果包含无文本【特殊情况】） -->
               <p>翻译生成的字幕将在此显示...</p>
+            </div>
+
+            <div v-if="isProcessing" class="subtitle-placeholder"> 
+              <p>正在准备翻译字幕，稍安勿躁...</p>
             </div>
 
             <div v-if="translated_subtitles.length === 0 && isTranslated" class="subtitle-placeholder"> 
@@ -84,6 +92,9 @@
             </div>
 
             <ul v-else class="subtitle-list" :key="translatedKey">
+              <section v-if="translated_subtitles.length > 0" @scroll="updateOriginalSubtitles" class="subtitle-list-info">
+                <p>已翻译 {{ translated_subtitles.length }} 条字幕</p>
+              </section>
               <li v-for="(subtitle, index) in translated_subtitles" :key="index" class="subtitle-item">
                 <span class="timestamp">{{ subtitle.timestamp }}</span>
                 <p class="text-original">{{ subtitle.original }}</p>
@@ -161,6 +172,7 @@ export default {
       if (file && (fileName.endsWith('.srt'))) {
         File.value = file;
         ElMessage.success('srt 字幕文件已成功加载');
+        
         readSubtitleFile(file); // 👈 添加解析方法
       } else if (file && fileName.endsWith('.json')) {
         File.value = file;
@@ -297,7 +309,15 @@ export default {
         return;
       }
       isProcessing.value = true;
-      console.log('开始处理文件:', File.value.name);
+      if (File.value.name.toLowerCase().endsWith('.json')) {
+        ElMessage.warning('当前上传的是 JSON 文件，无法进行翻译处理。请上传 SRT 字幕文件。');
+        isProcessing.value = false;
+        return;
+      }
+      ElMessage.info('开始处理文件:' + File.value.name);
+      if (File.value.size > 10 * 1024) {
+        ElMessage.warning('文件较大，处理时间可能较长，请耐心等待。');
+      }
       handleResponse(); // 👈 交给模块化函数处理
     };
 
@@ -479,6 +499,7 @@ export default {
     };
 
     const isResponsed = ref(false);
+    const originalSubtitlesList = ref(null);
 
     return {
       fileInput,
@@ -493,6 +514,7 @@ export default {
       animationDuration,
       originalKey,
       translatedKey,
+      originalSubtitlesList,
       triggerFileUpload,
       handleFileChange,
       clearFile,
@@ -720,9 +742,16 @@ body {
 
 .subtitle-list {
   list-style-type: none;
-  overflow-y: auto;
+  overflow-y: hidden;
   padding: 0;
   margin: 0;
+}
+
+.subtitle-list-info {
+  font-size: 1rem;
+  color: #008b25;
+  margin-bottom: 0rem;
+  margin-top: -1rem;
 }
 
 .subtitle-item {
@@ -822,6 +851,10 @@ body {
   background-color: rgba(255, 255, 255, 0.2); /* 可选：增加雾感 */
   z-index: 5;
   pointer-events: auto;
+}
+
+.my-custom-message {
+  color: var(--primary-color);
 }
 
 /* CSS动画效果 */
