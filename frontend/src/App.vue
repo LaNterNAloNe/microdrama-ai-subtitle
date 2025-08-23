@@ -1,4 +1,17 @@
 <template>
+  <transition name="fade-mask">
+    <div id="Crucial-Message-Body" v-if="isCrucialMessage"></div>
+  </transition>
+  <transition name="rapid-fade-zoom" :duration="rapidAnimationDuration">
+    <div class="crucial-message-container" v-if="isCrucialMessage">
+      <div class="crucial-message-content">
+        <h2>注意：</h2>
+        <p>{{ CrucialMessageContent }}</p>
+        <button class="process-button-red" @click="isCrucialMessage = false">我知道了</button>
+      </div>
+    </div>
+  </transition>
+
   <div id="app-container">
     <header class="app-header">
       <h1>中国网络微短剧英译智能体</h1>
@@ -147,7 +160,10 @@ export default {
     const isTranslated = ref(false);
     const downloadJSONoffset = ref(false);
     const downloadSRToffset = ref(false);
+    const rapidAnimationDuration = ref(500);
     const animationDuration = ref(1000);
+    const isCrucialMessage = ref(true);
+    const CrucialMessageContent = ref('当前版本仅支持英文到中文的翻译，不支持其他语言。');
     
     // Placeholder for subtitle data
     const original_subtitles = ref([
@@ -172,7 +188,6 @@ export default {
       if (file && (fileName.endsWith('.srt'))) {
         File.value = file;
         ElMessage.success('srt 字幕文件已成功加载');
-        
         readSubtitleFile(file); // 👈 添加解析方法
       } else if (file && fileName.endsWith('.json')) {
         File.value = file;
@@ -186,9 +201,12 @@ export default {
       const file = event.target.files[0];
       if (!file) return;
       const fileName = file.name.toLowerCase();
-        if (fileName.endsWith('.srt')) {
+      if (fileName.endsWith('.srt')) {
         File.value = file;
+        isCrucialMessage.value = true;
+        CrucialMessageContent.value = '喵~';
         ElMessage.success('srt 字幕文件已成功加载');
+
         readSubtitleFile(file); // 👈 添加解析方法
       } else if (fileName.endsWith('.json')) {
         File.value = file;
@@ -469,7 +487,8 @@ export default {
     ****************************************/
     onMounted(() => {
       window.addEventListener('beforeunload', handleBeforeUnload);
-      document.documentElement.style.setProperty('--duration', animationDuration.value + 'ms')
+      document.documentElement.style.setProperty('--duration', animationDuration.value + 'ms');
+      document.documentElement.style.setProperty('--rapid-duration', rapidAnimationDuration.value + 'ms');
     });
 
     onBeforeUnmount(() => {
@@ -512,9 +531,12 @@ export default {
       downloadJSONoffset,
       downloadSRToffset,
       animationDuration,
+      rapidAnimationDuration,
       originalKey,
       translatedKey,
       originalSubtitlesList,
+      isCrucialMessage,
+      CrucialMessageContent,
       triggerFileUpload,
       handleFileChange,
       clearFile,
@@ -592,6 +614,39 @@ body {
   color: #777;
   margin-top: 0.5rem;
 }
+
+/* Crucial Message */
+#Crucial-Message-Body {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5); /* 半透明背景 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9998; /* 确保在最上层 */
+}
+
+.crucial-message-container {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  z-index: 9999; /* 确保在最上层 */
+}
+
+.crucial-message-content {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  max-width: 400px;
+  margin-bottom: 1rem;
+}
+
 
 /* Main Content Layout */
 .main-content {
@@ -674,41 +729,41 @@ body {
 }
 
 .file-details p {
-    word-break: break-all;
-    background-color: #f0f0f0;
-    padding: 0.5rem;
-    border-radius: 5px;
+  word-break: break-all;
+  background-color: #f0f0f0;
+  padding: 0.5rem;
+  border-radius: 5px;
 }
 
 .process-button-green {
-    background-color: var(--secondary-color);
-    color: white;
-    border: none;
-    padding: 0.8rem 2rem;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: background-color 0.3s ease;
-    margin-top: 1rem;
+  background-color: var(--secondary-color);
+  color: white;
+  border: none;
+  padding: 0.8rem 2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: background-color 0.3s ease;
+  margin-top: 1rem;
 }
 
 .process-button-green:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
+  background-color: #ccc;
+  cursor: not-allowed;
 }
 
 .process-button-red {
-    background-color: var(--forbidden-color);
-    color: white;
-    border: none;
-    padding: 0.8rem 2rem;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 1rem;
-    font-weight: 500;
-    transition: background-color 0.3s ease;
-    margin-top: 1rem;
+  background-color: var(--forbidden-color);
+  color: white;
+  border: none;
+  padding: 0.8rem 2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: background-color 0.3s ease;
+  margin-top: 1rem;
 }
 
 /* Display Section */
@@ -826,6 +881,30 @@ body {
   opacity: 0;
 }
 
+.rapid-fade-zoom-enter-active {
+  transition: transform 250ms ease, opacity 250ms ease;
+}
+.rapid-fade-zoom-leave-active {
+  transition: transform var(--rapid-duration) ease, opacity var(--rapid-duration) ease;
+}
+
+.rapid-fade-zoom-enter-from {
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+}
+.rapid-fade-zoom-enter-to {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+.rapid-fade-zoom-leave-from {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
+.rapid-fade-zoom-leave-to {
+  transform: translate(-50%, -50%) scale(0.6);
+  opacity: 0;
+}
+
 .fade-mask-enter-active,
 .fade-mask-leave-active {
   transition: opacity 0.5s ease;
@@ -936,6 +1015,10 @@ body {
   .subtitle-area {
     height: auto;
     max-height: 250px;
+  }
+
+  .crucial-message-container {
+    width: 80%;
   }
 }
 
