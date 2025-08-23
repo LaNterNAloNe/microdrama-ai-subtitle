@@ -5,9 +5,9 @@
   <transition name="rapid-fade-zoom" :duration="rapidAnimationDuration">
     <div class="crucial-message-container" v-if="isCrucialMessage">
       <div class="crucial-message-content">
-        <h2>注意：</h2>
+        <h2>{{ CrucialMessageTitle }}</h2>
         <p>{{ CrucialMessageContent }}</p>
-        <button class="process-button-red" @click="isCrucialMessage = false">我知道了</button>
+        <button class="process-button-red" @click="isCrucialMessage = false, CrucialMessageTitle = '', CrucialMessageContent = ''">我知道了</button>
       </div>
     </div>
   </transition>
@@ -163,6 +163,7 @@ export default {
     const rapidAnimationDuration = ref(500);
     const animationDuration = ref(1000);
     const isCrucialMessage = ref(true);
+    const CrucialMessageTitle = ref('注意');
     const CrucialMessageContent = ref('当前版本仅支持英文到中文的翻译，不支持其他语言。');
     
     // Placeholder for subtitle data
@@ -203,8 +204,6 @@ export default {
       const fileName = file.name.toLowerCase();
       if (fileName.endsWith('.srt')) {
         File.value = file;
-        isCrucialMessage.value = true;
-        CrucialMessageContent.value = '喵~';
         ElMessage.success('srt 字幕文件已成功加载');
 
         readSubtitleFile(file); // 👈 添加解析方法
@@ -393,12 +392,21 @@ export default {
       } catch (error) {
         // 情况 3：网络错误或其他异常
         if (error.message.includes('Failed to fetch')) {
+          CrucialMessageTitle.value = '网络错误';
+          CrucialMessageContent.value = '无法连接服务器，请检查网络或稍后重试';
+          isCrucialMessage.value = true;
           throw new Error('网络错误：无法连接服务器，请检查网络或稍后重试');
         }
         if (error.message.includes('timeout')) {
+          CrucialMessageTitle.value = '请求超时';
+          CrucialMessageContent.value = '请检查网络连接或稍后重试';
+          isCrucialMessage.value = true;
           throw new Error('请求超时：请检查网络连接或稍后重试');
         }
         if (error.message.includes('400')) {
+          CrucialMessageTitle.value = '文件类型错误';
+          CrucialMessageContent.value = '请上传 SRT 文件';
+          isCrucialMessage.value = true;
           throw new Error('文件类型错误：请上传 SRT 文件');
         }
 
@@ -536,6 +544,7 @@ export default {
       translatedKey,
       originalSubtitlesList,
       isCrucialMessage,
+      CrucialMessageTitle,
       CrucialMessageContent,
       triggerFileUpload,
       handleFileChange,
@@ -571,12 +580,12 @@ export default {
 /* Global Styling */
 :root {
   --primary-color: #4A90E2;
-  --secondary-color: #50E3C2;
+  --secondary-color: rgb(80, 227, 194);
   --background-color: #f4f7f9;
   --text-color: #333;
   --border-color: #dbe2e8;
   --card-bg-color: #ffffff;
-  --forbidden-color: #ff4958;
+  --forbidden-color: rgb(255, 73, 88);
   --font-family: 'Helvetica Neue', Arial, sans-serif;
 }
 
@@ -699,6 +708,7 @@ body {
 .upload-box:hover {
   border-color: var(--primary-color);
   background-color: #f9fcff;
+  box-shadow: 0 0 12px rgba(33, 150, 243, 0.4); /* 激活时蓝色阴影增强 */
 }
 
 .upload-icon {
@@ -744,13 +754,21 @@ body {
   cursor: pointer;
   font-size: 1rem;
   font-weight: 500;
-  transition: background-color 0.3s ease;
+  transition: box-shadow 0.3s ease;
   margin-top: 1rem;
+}
+
+.process-button-green:hover {
+  box-shadow: 0 0 12px rgba(80, 227, 194, 0.6);
 }
 
 .process-button-green:disabled {
   background-color: #ccc;
   cursor: not-allowed;
+}
+
+.process-button-green:disabled:hover {
+  box-shadow: 0 0 12px rgba(204, 204, 204, 0.6);
 }
 
 .process-button-red {
@@ -762,8 +780,12 @@ body {
   cursor: pointer;
   font-size: 1rem;
   font-weight: 500;
-  transition: background-color 0.3s ease;
+  transition: box-shadow 0.3s ease;
   margin-top: 1rem;
+}
+
+.process-button-red:hover {
+  box-shadow: 0 0 12px rgba(255, 73, 88, 0.6);
 }
 
 /* Display Section */
@@ -932,9 +954,6 @@ body {
   pointer-events: auto;
 }
 
-.my-custom-message {
-  color: var(--primary-color);
-}
 
 /* CSS动画效果 */
 @keyframes fadeIn {
