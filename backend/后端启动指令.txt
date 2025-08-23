@@ -1,0 +1,3 @@
+1，在config.py中填api
+2，终端：uvicorn backend.main:app --reload --host 0.0.0.0 --port 8029
+3，fastapi的ui路由：http://localhost:8029/api/docs
